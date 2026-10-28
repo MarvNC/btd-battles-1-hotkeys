@@ -18,20 +18,37 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build with AutoHotkey Build action (v2)
-        uses: nukdokplex/autohotkey-build@v0.1
-        with:
-          # Use an explicit v2 release tag from the official AutoHotkey repo.
-          # To always get the latest v2 at build time, set this to the latest v2 tag when you update.
-          version: v2.0.18
-          x64: true
-          x86: true
-          x64_suffix: -x64
-          x86_suffix: -x86
-          compression: upx
-          in: .
-          out: dist
-
+      - name: Build and verify AutoHotkey v2 executables
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tools = Join-Path $env:RUNNER_TEMP 'ahk-build'
+          New-Item -ItemType Directory -Path "$tools/runtime", "$tools/compiler", 'dist' -Force | Out-Null
+          gh release download v2.0.18 --repo AutoHotkey/AutoHotkey --pattern '*.zip' --dir "$tools/runtime"
+          if ($LASTEXITCODE -ne 0) { throw 'AutoHotkey download failed' }
+          gh release download --repo AutoHotkey/Ahk2Exe --pattern '*.zip' --dir "$tools/compiler"
+          if ($LASTEXITCODE -ne 0) { throw 'Ahk2Exe download failed' }
+          Get-ChildItem "$tools/runtime/*.zip" | ForEach-Object { Expand-Archive $_.FullName "$tools/runtime" -Force }
+          Get-ChildItem "$tools/compiler/*.zip" | ForEach-Object { Expand-Archive $_.FullName "$tools/compiler" -Force }
+          $compiler = (Get-ChildItem "$tools/compiler" -Filter Ahk2Exe.exe -Recurse | Select-Object -First 1).FullName
+          if (!$compiler) { throw 'Ahk2Exe.exe missing' }
+          foreach ($arch in @('x64', 'x86')) {
+            $runtimeName = if ($arch -eq 'x64') { 'AutoHotkey64.exe' } else { 'AutoHotkey32.exe' }
+            $runtime = (Get-ChildItem "$tools/runtime" -Filter $runtimeName -Recurse | Select-Object -First 1).FullName
+            if (!$runtime) { throw "$runtimeName missing" }
+            $output = Join-Path $PWD "dist/btd-battles-1-hotkeys-$arch.exe"
+            $arguments = '/in "{0}" /out "{1}" /base "{2}" /compress 0 /silent verbose' -f (Join-Path $PWD 'btd-battles-1-hotkeys.ahk'), $output, $runtime
+            $build = Start-Process $compiler -ArgumentList $arguments -Wait -PassThru
+            if ($build.ExitCode -ne 0 -or !(Test-Path $output)) { throw "$arch compilation failed" }
+            $bytes = [IO.File]::ReadAllBytes($output)
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            $expected = if ($arch -eq 'x64') { 0x8664 } else { 0x14c }
+            if ($machine -ne $expected) { throw "$arch output has wrong PE architecture: $machine" }
+            Write-Host "Verified $arch executable ($($bytes.Length) bytes)"
+          }
       - name: Capture release timestamp
         id: release_meta
         shell: pwsh
@@ -60,4 +77,5 @@ jobs:
           fail_on_unmatched_files: true
           files: |
             dist/*.exe
+
 

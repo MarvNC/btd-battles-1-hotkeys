@@ -18,8 +18,8 @@ All hotkeys apply only while `Battles-Win.exe` is the active window.
 To stop the script, right-click its AutoHotkey system tray icon and choose Exit.
 ## Automated builds
 
-GitHub Actions builds x64 and x86 executables using the same AutoHotkey v2 build
-action as [win-to-mac-ahk](https://github.com/MarvNC/win-to-mac-ahk).
+GitHub Actions builds x64 and x86 executables with official AutoHotkey v2 and Ahk2Exe downloads, and verifies the architecture of each executable.
 Pushes to `main`, tags, and manual workflow runs publish a new release with both
 executables. Pull requests build downloadable workflow artifacts without publishing
 a release.
+
